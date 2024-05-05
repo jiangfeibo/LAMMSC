@@ -3,7 +3,7 @@ import MMA
 import LKB
 
 if __name__ == '__main__':
-    # an example for transmitting images
+    # an example of transmitting images
     img_path = "imgs" # your image path
     # Modal transformation based on MMA
     texts = MMA.img2text(img_path)
