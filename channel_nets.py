@@ -1,15 +1,18 @@
 from __future__ import print_function
+
+import os.path
+
 import torch
 import torch.nn as nn
-import numpy as np
-import torch.nn.functional as F
-import pickle
 from CGE import channel_estimation
 import random
-x_data = torch.load("X_data.pt")
-y_data = torch.load("Y_data.pt")
-H_data = torch.load("H_data.pt")
 
+# Load local CSI data
+x_data = torch.load(os.path.join("CSI_data","X_data.pt"))
+y_data = torch.load(os.path.join("CSI_data","Y_data.pt"))
+H_data = torch.load(os.path.join("CSI_data","H_data.pt"))
+
+# Definition of the fading channel
 def fading_channel(x, snr, CGE = False):
     [batch_size, feature_length] = x.shape
     x = torch.reshape(x, (batch_size, -1, 2))
@@ -42,6 +45,7 @@ def fading_channel(x, snr, CGE = False):
     y_tensor = torch.reshape(y_tensor, (batch_size, feature_length))
     return y_tensor
 
+# Definition of the channel network
 class channel_net(nn.Module):
     def __init__(self, in_dims=512, mid_dims=128, snr=15, CGE=False):
         super(channel_net, self).__init__()

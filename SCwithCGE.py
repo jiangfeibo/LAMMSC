@@ -9,22 +9,22 @@ import json
 from channel_nets import channel_net
 import os
 class params():
-    checkpoint_path = "checkpoints"
+    checkpoint_path = "checkpoints" # path to model weights
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset = r"E:\datasets\VOC2012_img2text"
-    log_path = "logs"
-    epoch = 20
-    lr = 1e-3
-    batchsize = 16
-    snr = 15
+    dataset = r"E:\datasets\VOC2012_img2text" # path to your text data
+    log_path = "logs" # path to logs
+    epoch = 20 # training epoch
+    lr = 1e-3 # learning rate
+    batchsize = 16 # training batch size
+    snr = 15 # SNR
     weight_delay = 1e-5
-    sim_th = 0.6
-    emb_dim = 768
-    n_heads = 8
-    hidden_dim = 1024
-    num_layers = 2
-    use_CGE = True
-    max_length = 30
+    sim_th = 0.6 # cosine similarity threshold
+    emb_dim = 768 # embedding size of the SC model
+    n_heads = 8 # head number of the SC model
+    hidden_dim = 1024 # dimensions of hidden layers in the SC model
+    num_layers = 2 # layers of the transformer decoder in the SC model
+    use_CGE = True # use CGE for channel estimation or not
+    max_length = 30 # maximum number of words in each text
 
 def same_seeds(seed):
     # Python built-in random module
@@ -39,10 +39,11 @@ def same_seeds(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+# Transformer-based text SC model
 class TextSCNet(nn.Module):
     def __init__(self, emb_dim, n_heads, hidden_dim, num_layers):
         super(TextSCNet, self).__init__()
-        self.encoder = BertModel.from_pretrained('bert-base-uncased')
+        self.encoder = BertModel.from_pretrained('bert-base-uncased') # use Bert as the Semantic encoder
         self.decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(emb_dim, n_heads, hidden_dim), num_layers)
         self.fc = nn.Linear(emb_dim, self.encoder.config.vocab_size)
         self.channel_model = channel_net(in_dims=23040, snr=arg.snr,CGE=arg.use_CGE)
@@ -58,9 +59,9 @@ class TextSCNet(nn.Module):
         decoded_output = self.fc(decoded)
         return ch_code, ch_code_, s_code, s_code_d, decoded_output
 
+# SC model training
 def SC_train(model,tokenizer, training_texts, arg):
     model.to(arg.device)
-    # define optimizer
     criterion = nn.CrossEntropyLoss()
     mse = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=2e-5)
@@ -122,6 +123,7 @@ def SC_train(model,tokenizer, training_texts, arg):
             print(f"epoch {epoch}, loss: {loss.item()}")
         torch.save(model.state_dict(), weights_path)
 
+# Data transmission based on the trained SC model
 @torch.no_grad()
 def data_transmission(input_text):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -170,7 +172,6 @@ if __name__ == '__main__':
                 content = json.load(f)
                 content = [val.replace("<unk>", "") for val in content]
             train_data += content
-    print(arg.device)
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     SC_model = TextSCNet(arg.emb_dim, arg.n_heads, arg.hidden_dim, arg.num_layers).to(arg.device)
     SC_train(SC_model,tokenizer,train_data,arg)

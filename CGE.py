@@ -7,6 +7,7 @@ import numpy as np
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
 ## CGAN
+# The definition of G network, aiming to generate CSI.
 class G_Net(nn.Module):
     def __init__(self, indim = 128):
         super(G_Net, self).__init__()
@@ -56,6 +57,7 @@ class G_Net(nn.Module):
         z = self.decoder(z)
         return z
 
+# The definition of D network, aiming to discriminate the true or generated CSI.
 class D_Net(nn.Module):
     def __init__(self, indim=128):
         super(D_Net, self).__init__()
@@ -77,6 +79,7 @@ class D_Net(nn.Module):
         z = F.sigmoid(self.output(z))
         return z
 
+# Generate true CSI
 def CSI_generator(num_sample, feature_length):
     P_hdB = np.array([0, -8, -17, -21, -25])  # Power characteristics of each channels(dB)
     D_h = [0, 3, 5, 6, 8]  # Each channel delay(sampling point)
@@ -98,6 +101,7 @@ def CSI_generator(num_sample, feature_length):
     h_fft = torch.fft.fft(h, feature_length // 2)
     return h_fft
 
+# Save the true and generated CSI as images
 def save_imgs(H,H_p,e):
     plt.figure()
     plt.imshow(H)
@@ -109,24 +113,29 @@ def save_imgs(H,H_p,e):
     plt.axis("off")
     plt.savefig(f"H_p_{e}.jpg",bbox_inches='tight', pad_inches=0)
 
+# Parameter setting for the CGAN training
 class params():
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    lr_G = 2e-3
-    lr_D = 2e-3
-    num_sample = 8
+    lr_G = 2e-3 # learning rate of G network
+    lr_D = 2e-3 # learning rate of D network
+    num_sample = 8 # rows of a CSI
+    feature_length = 128  # columns of a CSI
     batchsize = 1024
     epoch = 1000
-    feature_length = 128
     snr = 15
     weight_path = "checkpoints"
+    training_samples = 50000 # training samples for the CGAN
+    data_save_path = "CSI_data" # path to save the training samples
+    os.makedirs(data_save_path,exist_ok=True)
 
 args = params()
 
+# Generate training data for the CGAN, including emitted data X, received data Y, and CSI H.
 def data_generator(args:params):
     print("Data generation...")
     b_x, b_y, b_H = [],[],[]
-    for i in range(50000):
+    for i in range(args.training_samples): # we assume generate 50000 samples
         x_pilot = torch.ones((args.num_sample, args.feature_length // 2, 2))
         x_com = torch.complex(x_pilot[:, :, 0], x_pilot[:, :, 1])
         x_fft = torch.fft.fft(x_com)
@@ -148,12 +157,13 @@ def data_generator(args:params):
     b_x = torch.stack(b_x, dim=0)
     b_y = torch.stack(b_y, dim=0)
     b_H = torch.stack(b_H, dim=0)
-    # save data to local
-    torch.save(b_x,"X_data.pt")
-    torch.save(b_y,"Y_data.pt")
-    torch.save(b_H,"H_data.pt")
+    # save training data to local
+    torch.save(b_x,os.path.join(args.data_save_path,"X_data.pt"))
+    torch.save(b_y,os.path.join(args.data_save_path,"Y_data.pt"))
+    torch.save(b_H,os.path.join(args.data_save_path,"H_data.pt"))
     return b_x, b_y, b_H
 
+# The implementation of the CGAN training
 def train(G, D, args:params):
     # Set loss function
     criterion_1 = nn.L1Loss()
@@ -164,14 +174,17 @@ def train(G, D, args:params):
     optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr_G)
     optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr_D)
     # Training
-    x_data, y_data, H_data = data_generator(args)
-    x_data = torch.load("X_data.pt")
-    y_data = torch.load("Y_data.pt")
-    H_data = torch.load("H_data.pt")
+    if not os.path.exists(os.path.join(args.data_save_path,"X_data.pt")): # if no local data, generate data
+        x_data, y_data, H_data = data_generator(args)
+    else: # load local data
+        x_data = torch.load(os.path.join(args.data_save_path,"X_data.pt"))
+        y_data = torch.load(os.path.join(args.data_save_path,"Y_data.pt"))
+        H_data = torch.load(os.path.join(args.data_save_path,"H_data.pt"))
     for epoch in range(args.epoch):
         nmses = []
         training_size = x_data.shape[0]
         for i in range(0,training_size,args.batchsize):
+            # load a batch data
             if i+args.batchsize < training_size:
                 b_x = x_data[i:i+args.batchsize]
                 b_y = y_data[i:i + args.batchsize]
@@ -184,7 +197,7 @@ def train(G, D, args:params):
             b_x = b_x.to(args.device)
             b_y = b_y.to(args.device)
             b_H = b_H.to(args.device)
-            # train D
+            # train D network
             G.eval()
             D.train()
             b_H_p = G(b_x, b_y).detach()
@@ -199,7 +212,7 @@ def train(G, D, args:params):
             loss_D.backward()
             optimizer_D.step()
 
-            # train G
+            # train G network
             G.train()
             D.eval()
             b_H_p = G(b_x, b_y)
@@ -219,6 +232,7 @@ def train(G, D, args:params):
             H_p = b_H_p[0].cpu().detach().numpy()
             save_imgs(H, H_p, epoch)
 
+# Perform channel estimation using the trained CGAN
 @torch.no_grad()
 def channel_estimation(x, y, snr):
     G = G_Net(args.feature_length)
